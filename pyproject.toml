@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yolo-robustness-lab"
+version = "0.1.0"
+description = "Reproducible robustness benchmarking for YOLO object detectors"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["ultralytics>=8.3,<9", "opencv-python-headless>=4.8", "numpy>=1.24", "pandas>=2.0", "matplotlib>=3.7", "Pillow>=10", "PyYAML>=6"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+art = ["adversarial-robustness-toolbox>=1.20"]
+
+[project.scripts]
+yolo-robustness = "yolo_robustness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
