@@ -2,10 +2,12 @@ from dataclasses import dataclass, asdict
 import cv2
 import numpy as np
 
+
 @dataclass(frozen=True)
 class TransformSpec:
     name: str
     params: dict
+
 
 def standard_suite():
     """Deterministic corruption suite for repeatable detector robustness tests."""
@@ -29,18 +31,49 @@ def standard_suite():
         TransformSpec('horizontal_stripes', {'spacing': 24, 'thickness': 3, 'alpha': .35}),
     ]
 
+
+def severity_suite():
+    """Ordered mild/moderate/severe variants for robustness curves."""
+    return [
+        TransformSpec('clean', {'severity': 'baseline'}),
+        TransformSpec('brightness_down_mild', {'factor': .85, 'severity': 'mild'}),
+        TransformSpec('brightness_down_moderate', {'factor': .65, 'severity': 'moderate'}),
+        TransformSpec('brightness_down_severe', {'factor': .45, 'severity': 'severe'}),
+        TransformSpec('gaussian_blur_mild', {'sigma': 1.0, 'severity': 'mild'}),
+        TransformSpec('gaussian_blur_moderate', {'sigma': 2.0, 'severity': 'moderate'}),
+        TransformSpec('gaussian_blur_severe', {'sigma': 5.0, 'severity': 'severe'}),
+        TransformSpec('gaussian_noise_mild', {'std': 5.0, 'seed': 7, 'severity': 'mild'}),
+        TransformSpec('gaussian_noise_moderate', {'std': 10.0, 'seed': 7, 'severity': 'moderate'}),
+        TransformSpec('gaussian_noise_severe', {'std': 25.0, 'seed': 7, 'severity': 'severe'}),
+        TransformSpec('jpeg_mild', {'quality': 80, 'severity': 'mild'}),
+        TransformSpec('jpeg_moderate', {'quality': 50, 'severity': 'moderate'}),
+        TransformSpec('jpeg_severe', {'quality': 20, 'severity': 'severe'}),
+        TransformSpec('motion_blur_mild', {'size': 5, 'angle': 0, 'severity': 'mild'}),
+        TransformSpec('motion_blur_moderate', {'size': 9, 'angle': 0, 'severity': 'moderate'}),
+        TransformSpec('motion_blur_severe', {'size': 15, 'angle': 0, 'severity': 'severe'}),
+        TransformSpec('center_occlusion_mild', {'fraction': .10, 'severity': 'mild'}),
+        TransformSpec('center_occlusion_moderate', {'fraction': .18, 'severity': 'moderate'}),
+        TransformSpec('center_occlusion_severe', {'fraction': .30, 'severity': 'severe'}),
+    ]
+
+
 def _motion_kernel(size, angle):
     size = max(3, int(size) | 1)
     kernel = np.zeros((size, size), dtype=np.float32)
-    kernel[size // 2, :] = 1.0 / size
+    kernel[size // 2, :] = 1.0
     center = (size / 2 - .5, size / 2 - .5)
     matrix = cv2.getRotationMatrix2D(center, float(angle), 1.0)
-    return cv2.warpAffine(kernel, matrix, (size, size))
+    kernel = cv2.warpAffine(kernel, matrix, (size, size), flags=cv2.INTER_LINEAR)
+    total = float(kernel.sum())
+    if total <= 0:
+        raise ValueError('Motion blur kernel has zero weight')
+    return kernel / total
+
 
 def apply(image, spec):
     if spec.name == 'clean':
         return image.copy()
-    if spec.name.startswith('brightness_'):
+    if spec.name.startswith('brightness_down') or spec.name.startswith('brightness_up'):
         return np.clip(image.astype(np.float32) * spec.params['factor'], 0, 255).astype(np.uint8)
     if spec.name.startswith('contrast_'):
         mean = image.mean(axis=(0, 1), keepdims=True)
@@ -48,9 +81,9 @@ def apply(image, spec):
         return np.clip((image.astype(np.float32) - mean) * f + mean, 0, 255).astype(np.uint8)
     if spec.name.startswith('gaussian_blur'):
         return cv2.GaussianBlur(image, (0, 0), sigmaX=spec.params['sigma'])
-    if spec.name == 'motion_blur':
+    if spec.name.startswith('motion_blur'):
         return cv2.filter2D(image, -1, _motion_kernel(spec.params['size'], spec.params['angle']))
-    if spec.name.startswith('jpeg_quality'):
+    if spec.name.startswith('jpeg_quality') or spec.name == 'jpeg_mild' or spec.name == 'jpeg_moderate' or spec.name == 'jpeg_severe':
         ok, enc = cv2.imencode('.jpg', image, [cv2.IMWRITE_JPEG_QUALITY, int(spec.params['quality'])])
         if not ok:
             raise RuntimeError('JPEG encoding failed')
@@ -73,7 +106,7 @@ def apply(image, spec):
         radius = np.sqrt(dx * dx + dy * dy)
         mask = 1.0 - float(spec.params['strength']) * np.clip(radius, 0, 1) ** 2
         return np.clip(image.astype(np.float32) * mask[..., None], 0, 255).astype(np.uint8)
-    if spec.name == 'center_occlusion':
+    if spec.name.startswith('center_occlusion'):
         out = image.copy()
         h, w = out.shape[:2]
         frac = float(spec.params['fraction'])
@@ -100,6 +133,7 @@ def apply(image, spec):
             out[y:y + thickness] *= (1.0 - alpha)
         return np.clip(out, 0, 255).astype(np.uint8)
     raise ValueError(f'Unknown transform: {spec.name}')
+
 
 def specs_to_dict(specs):
     return [asdict(s) for s in specs]
