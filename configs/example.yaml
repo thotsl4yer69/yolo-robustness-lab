@@ -1,0 +1,9 @@
+images: data/images
+labels: data/labels
+model: yolov8n.pt
+output: runs/example
+confidence_threshold: 0.25
+matching_iou_threshold: 0.50
+imgsz: 640
+class_id: 0
+transform_suite: standard
