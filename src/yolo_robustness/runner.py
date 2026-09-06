@@ -2,14 +2,17 @@ from pathlib import Path
 import csv,json,platform,sys,cv2
 from .data import discover_samples,read_yolo_labels
 from .metrics import evaluate
-from .transforms import standard_suite,apply,specs_to_dict
+from .transforms import standard_suite,severity_suite,apply,specs_to_dict
 from .detector import UltralyticsDetector
 
 def run_benchmark(images,labels,model,output,conf=.25,iou_threshold=.5,imgsz=640,class_id=0,device=None,transform_suite='standard'):
     output=Path(output); output.mkdir(parents=True,exist_ok=True); annotated=output/'annotated'; annotated.mkdir(exist_ok=True)
     samples=discover_samples(images,labels); detector=UltralyticsDetector(model,device,imgsz)
-    specs=standard_suite() if transform_suite=='standard' else [s for s in standard_suite() if s.name=='clean']
-    config={'model':str(model),'confidence_threshold':conf,'matching_iou_threshold':iou_threshold,'imgsz':imgsz,'class_id':class_id,'device':device,'transform_suite':specs_to_dict(specs),'python':sys.version,'platform':platform.platform()}
+    if transform_suite=='standard': specs=standard_suite()
+    elif transform_suite=='severity': specs=severity_suite()
+    elif transform_suite=='clean': specs=[s for s in standard_suite() if s.name=='clean']
+    else: raise ValueError(f'Unknown transform suite: {transform_suite}')
+    config={'model':str(model),'confidence_threshold':conf,'matching_iou_threshold':iou_threshold,'imgsz':imgsz,'class_id':class_id,'device':device,'transform_suite_name':transform_suite,'transform_suite':specs_to_dict(specs),'python':sys.version,'platform':platform.platform()}
     (output/'config.json').write_text(json.dumps(config,indent=2)); rows=[]; detection_rows=[]
     for sample in samples:
         image=cv2.imread(str(sample.image_path))
@@ -24,6 +27,7 @@ def run_benchmark(images,labels,model,output,conf=.25,iou_threshold=.5,imgsz=640
             for p in preds:
                 cv2.rectangle(vis,(int(p.x1),int(p.y1)),(int(p.x2),int(p.y2)),(0,255,0),2); cv2.putText(vis,f'{p.confidence:.2f}',(int(p.x1),max(15,int(p.y1)-4)),cv2.FONT_HERSHEY_SIMPLEX,.5,(0,255,0),1)
             cv2.imwrite(str(annotated/f'{sample.image_path.stem}__{spec.name}{sample.image_path.suffix}'),vis)
+    if not rows: raise RuntimeError('No image/label samples were discovered')
     with (output/'metrics.csv').open('w',newline='') as f:
         writer=csv.DictWriter(f,fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
     with (output/'detections.csv').open('w',newline='') as f:
